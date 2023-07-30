@@ -1,11 +1,11 @@
-FROM golang:1.20.5
+FROM golang:1.21rc3
 
 WORKDIR /work
 COPY . ./
 RUN go mod tidy
 RUN go build -o ribapuro
 
-FROM golang:1.20.5
+FROM golang:1.21rc3
 
 RUN useradd app
 USER app
