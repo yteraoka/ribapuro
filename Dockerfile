@@ -1,17 +1,21 @@
-FROM golang:1.26.2
+FROM golang:1.26.2 AS build
 
-WORKDIR /work
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
 COPY . ./
-RUN go mod tidy
-RUN go build -o ribapuro
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ribapuro
+# Created here so that it can be copied in with the right owner below:
+# the runtime image has no shell to mkdir with.
+RUN mkdir -p /out/sites
 
-FROM golang:1.26.2
+FROM gcr.io/distroless/static-debian12:nonroot
 
-RUN useradd app
-USER app
+COPY --from=build /out/ribapuro /app/ribapuro
+COPY --from=build --chown=nonroot:nonroot /out/sites /app/sites
 WORKDIR /app
-COPY --from=0 /work/ribapuro /app/ribapuro
+USER nonroot
 VOLUME /app/sites
 
 EXPOSE 8080
-CMD ["/app/ribapuro"]
+ENTRYPOINT ["/app/ribapuro"]

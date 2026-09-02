@@ -1,1 +1,8 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+Caddyfile
 sites
+ribapuro
