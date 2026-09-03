@@ -33,6 +33,18 @@ docker run --rm -p 8080:8080 -v "$PWD/sites:/app/sites" ribapuro
 `sites` をホストの volume に mount する場合、コンテナ内のユーザー (uid 65532)
 が書き込めるようにしておくこと。
 
+## リリース
+
+[tagpr](https://github.com/Songmu/tagpr) が main への push を監視し、未リリースの
+変更があればバージョン更新用の Pull Request を自動作成する。その PR をマージす
+ると tagpr が新しいタグを push し、[GoReleaser](https://goreleaser.com/) が
+linux/darwin/windows (amd64/arm64) 向けバイナリをビルドして GitHub Release に
+添付する。手元でリリース物を作る場合は次のコマンドで確認できる。
+
+```
+goreleaser release --snapshot --clean
+```
+
 # Caddy で TLS 終端
 
 次のような内容の Caddyfile を用意して
