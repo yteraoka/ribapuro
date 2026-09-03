@@ -171,7 +171,7 @@ func TestProxyEndToEnd(t *testing.T) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Content-Type", "text/html")
 		gz := gzip.NewWriter(w)
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		_, _ = gz.Write([]byte("<html>" + r.URL.Path + "</html>"))
 	}))
 	defer upstream.Close()
@@ -200,7 +200,7 @@ func TestProxyEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)

@@ -187,7 +187,7 @@ func requestScheme(r *http.Request) string {
 // that it can still be sent to the client. Bodies are buffered in memory.
 func saveResponse(baseDir string, resp *http.Response) error {
 	buf, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return err
 	}
@@ -272,7 +272,7 @@ func decodeBody(encoding string, buf []byte) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported Content-Encoding %q", encoding)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	decoded, err := io.ReadAll(reader)
 	if err != nil {
