@@ -69,6 +69,11 @@ linux/darwin/windows (amd64/arm64) 向けバイナリをビルドして GitHub R
 goreleaser release --snapshot --clean
 ```
 
+tagpr のタグ push には GitHub App の token (`vars.TAGPR_APP_ID` /
+`secrets.TAGPR_APP_PRIVATE_KEY`) を使う。`secrets.GITHUB_TOKEN` で push した
+タグは workflow を起動しない (GitHub Actions のループ防止) ため、それでは
+goreleaser の workflow が動かない。
+
 # Caddy で TLS 終端
 
 次のような内容の Caddyfile を用意して
