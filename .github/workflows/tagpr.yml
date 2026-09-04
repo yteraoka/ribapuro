@@ -4,9 +4,10 @@ on:
   push:
     branches: ["main"]
 
+# tagpr は GitHub App の token で push する。secrets.GITHUB_TOKEN で作った tag は
+# workflow を起動しない (Actions のループ防止) ため、それでは goreleaser が動かない。
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   tagpr:
@@ -14,10 +15,15 @@ jobs:
     outputs:
       tag: ${{ steps.tagpr.outputs.tag }}
     steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.TAGPR_APP_ID }}
+          private-key: ${{ secrets.TAGPR_APP_PRIVATE_KEY }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: tagpr
         uses: Songmu/tagpr@7ebae2dcc300132baa7cc9dd108c8923b07fc366 # v1.20.3
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
