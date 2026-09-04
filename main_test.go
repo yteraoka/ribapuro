@@ -182,7 +182,7 @@ func TestProxyEndToEnd(t *testing.T) {
 	}
 
 	base := t.TempDir()
-	proxy, err := newProxy(base, "") // system resolver: upstream is on 127.0.0.1
+	proxy, err := newProxy(base, "", nil) // system resolver: upstream is on 127.0.0.1
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +230,138 @@ func TestProxyEndToEnd(t *testing.T) {
 	}
 	if want := "<html>/dir/</html>"; string(got) != want {
 		t.Errorf("saved body = %q, want %q", got, want)
+	}
+}
+
+func TestContentTypeFilter(t *testing.T) {
+	tests := []struct {
+		name        string
+		patterns    []string
+		contentType string
+		want        bool
+	}{
+		{name: "no filter saves everything", contentType: "image/png", want: true},
+		{name: "no filter saves missing type", want: true},
+		{name: "exact", patterns: []string{"text/html"}, contentType: "text/html", want: true},
+		{name: "exact miss", patterns: []string{"text/html"}, contentType: "text/plain"},
+		{name: "with parameters", patterns: []string{"text/html"}, contentType: "text/html; charset=UTF-8", want: true},
+		{name: "malformed parameters", patterns: []string{"text/html"}, contentType: "text/html; charset", want: true},
+		{name: "upper case header", patterns: []string{"text/html"}, contentType: "TEXT/HTML", want: true},
+		{name: "upper case pattern", patterns: []string{"TEXT/HTML"}, contentType: "text/html", want: true},
+		{name: "subtype glob", patterns: []string{"text/*"}, contentType: "text/css", want: true},
+		{name: "subtype glob miss", patterns: []string{"text/*"}, contentType: "image/png"},
+		{name: "type glob", patterns: []string{"*/json"}, contentType: "application/json", want: true},
+		{name: "subtype glob does not cross slash", patterns: []string{"*/*"}, contentType: "text/html/x"},
+		{name: "bare type means whole type", patterns: []string{"text"}, contentType: "text/html", want: true},
+		{name: "bare star means everything", patterns: []string{"*"}, contentType: "image/png", want: true},
+		{name: "suffix glob", patterns: []string{"*/*+json"}, contentType: "application/problem+json", want: true},
+		{name: "multiple patterns", patterns: []string{"text/*", "application/json"}, contentType: "application/json", want: true},
+		{name: "multiple patterns miss", patterns: []string{"text/*", "application/json"}, contentType: "image/png"},
+		{name: "missing content type", patterns: []string{"text/*"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, err := newContentTypeFilter(tt.patterns)
+			if err != nil {
+				t.Fatalf("newContentTypeFilter(%q): %v", tt.patterns, err)
+			}
+			if got := filter.match(tt.contentType); got != tt.want {
+				t.Errorf("match(%q) with %q = %v, want %v", tt.contentType, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewContentTypeFilter(t *testing.T) {
+	filter, err := newContentTypeFilter([]string{"  Text/HTML  ", "", "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := filter.String(), "text/html, image/*"; got != want {
+		t.Errorf("filter = %q, want %q", got, want)
+	}
+	if _, err := newContentTypeFilter([]string{"text/[html"}); err == nil {
+		t.Error("newContentTypeFilter with a bad glob = nil error, want error")
+	}
+}
+
+func TestStringListSet(t *testing.T) {
+	var list stringList
+	if err := list.Set("text/html, text/css"); err != nil {
+		t.Fatal(err)
+	}
+	if err := list.Set("application/json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := list.Set(""); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := list.String(), "text/html,text/css,application/json"; got != want {
+		t.Errorf("list = %q, want %q", got, want)
+	}
+	if len(list) != 3 {
+		t.Errorf("len(list) = %d, want 3", len(list))
+	}
+}
+
+// A response whose Content-Type is not selected must still reach the client
+// untouched, it is only not written to disk.
+func TestProxyContentTypeFilter(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else {
+			w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		}
+		_, _ = io.WriteString(w, "body:"+r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := t.TempDir()
+	filter, err := newContentTypeFilter([]string{"text/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := newProxy(base, "", filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(proxy)
+	defer front.Close()
+
+	for _, p := range []string{"/a.html", "/b.png"} {
+		req, err := http.NewRequest(http.MethodGet, front.URL+p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = upstreamURL.Host
+		resp, err := front.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "body:" + p; string(body) != want {
+			t.Errorf("GET %s body = %q, want %q", p, body, want)
+		}
+	}
+
+	host := sanitizeSegment(upstreamURL.Host)
+	if got, err := os.ReadFile(filepath.Join(base, host, "a.html")); err != nil {
+		t.Errorf("a.html was not saved: %v", err)
+	} else if want := "body:/a.html"; string(got) != want {
+		t.Errorf("saved a.html = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(base, host, "b.png")); !os.IsNotExist(err) {
+		t.Errorf("b.png stat error = %v, want not exist", err)
 	}
 }

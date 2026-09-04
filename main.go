@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -38,7 +39,23 @@ type config struct {
 	addr            string
 	dir             string
 	resolver        string
+	contentTypes    []string
 	shutdownTimeout time.Duration
+}
+
+// stringList collects a flag that may be repeated and whose value may itself
+// be a comma separated list.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, ",") }
+
+func (l *stringList) Set(value string) error {
+	for _, v := range strings.Split(value, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			*l = append(*l, v)
+		}
+	}
+	return nil
 }
 
 func main() {
@@ -49,8 +66,18 @@ func main() {
 	flag.StringVar(&cfg.dir, "dir", envOr("RIBAPURO_DIR", "sites"), "directory to save response bodies into")
 	flag.StringVar(&cfg.resolver, "resolver", envOr("RIBAPURO_RESOLVER", "1.1.1.1:53"),
 		"DNS server (host:port) used to resolve upstream hosts; empty to use the system resolver")
+	var contentTypes stringList
+	flag.Var(&contentTypes, "content-type",
+		"save only responses whose Content-Type matches one of these glob patterns "+
+			`(e.g. "text/*", "*/*json*"); repeatable and comma separated; empty saves everything`)
 	flag.DurationVar(&cfg.shutdownTimeout, "shutdown-timeout", 10*time.Second, "graceful shutdown timeout")
 	flag.Parse()
+
+	// The flag replaces the environment variable rather than adding to it.
+	if len(contentTypes) == 0 {
+		_ = contentTypes.Set(envOr("RIBAPURO_CONTENT_TYPE", ""))
+	}
+	cfg.contentTypes = contentTypes
 
 	if err := run(cfg); err != nil {
 		log.Fatal(err)
@@ -66,7 +93,12 @@ func run(cfg config) error {
 		return fmt.Errorf("create -dir: %w", err)
 	}
 
-	proxy, err := newProxy(baseDir, cfg.resolver)
+	filter, err := newContentTypeFilter(cfg.contentTypes)
+	if err != nil {
+		return err
+	}
+
+	proxy, err := newProxy(baseDir, cfg.resolver, filter)
 	if err != nil {
 		return err
 	}
@@ -84,7 +116,11 @@ func run(cfg config) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("listening on %s, saving into %s", cfg.addr, baseDir)
+		if len(filter) == 0 {
+			log.Printf("listening on %s, saving into %s", cfg.addr, baseDir)
+		} else {
+			log.Printf("listening on %s, saving into %s (Content-Type: %s)", cfg.addr, baseDir, filter)
+		}
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -103,7 +139,7 @@ func run(cfg config) error {
 	}
 }
 
-func newProxy(baseDir, resolver string) (*httputil.ReverseProxy, error) {
+func newProxy(baseDir, resolver string, filter contentTypeFilter) (*httputil.ReverseProxy, error) {
 	transport, err := newTransport(resolver)
 	if err != nil {
 		return nil, err
@@ -124,7 +160,7 @@ func newProxy(baseDir, resolver string) (*httputil.ReverseProxy, error) {
 			log.Printf("%s %s://%s%s", pr.In.Method, pr.Out.URL.Scheme, pr.Out.URL.Host, pr.Out.URL.RequestURI())
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			return saveResponse(baseDir, resp)
+			return saveResponse(baseDir, filter, resp)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("proxy error: %s %s: %v", r.Method, r.Host, err)
@@ -183,9 +219,70 @@ func requestScheme(r *http.Request) string {
 	return "http"
 }
 
+// contentTypeFilter selects the responses to save by their media type. An
+// empty filter selects everything.
+type contentTypeFilter []string
+
+func (f contentTypeFilter) String() string { return strings.Join(f, ", ") }
+
+// newContentTypeFilter validates the glob patterns up front so that a typo is
+// reported at startup instead of silently matching nothing. A pattern without
+// a "/" names a whole type, so "text" means "text/*" and "*" means "*/*".
+func newContentTypeFilter(patterns []string) (contentTypeFilter, error) {
+	var filter contentTypeFilter
+	for _, pattern := range patterns {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		if !strings.Contains(pattern, "/") {
+			pattern += "/*"
+		}
+		if _, err := path.Match(pattern, "text/plain"); err != nil {
+			return nil, fmt.Errorf("invalid -content-type %q: %w", pattern, err)
+		}
+		filter = append(filter, pattern)
+	}
+	return filter, nil
+}
+
+// match reports whether a response with this Content-Type header should be
+// saved. The glob is matched against the media type alone, with "*" not
+// crossing the "/" so that "text/*" means every text subtype.
+func (f contentTypeFilter) match(header string) bool {
+	if len(f) == 0 {
+		return true
+	}
+	mediaType := parseMediaType(header)
+	for _, pattern := range f {
+		if ok, err := path.Match(pattern, mediaType); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// parseMediaType returns the lower cased "type/subtype" of a Content-Type
+// header, dropping its parameters.
+func parseMediaType(header string) string {
+	if mediaType, _, err := mime.ParseMediaType(header); err == nil {
+		return mediaType
+	}
+	// Malformed parameters ("text/html; charset") must not hide the type.
+	if i := strings.IndexByte(header, ';'); i >= 0 {
+		header = header[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(header))
+}
+
 // saveResponse writes the response body to a file and restores the body so
 // that it can still be sent to the client. Bodies are buffered in memory.
-func saveResponse(baseDir string, resp *http.Response) error {
+func saveResponse(baseDir string, filter contentTypeFilter, resp *http.Response) error {
+	if contentType := resp.Header.Get("Content-Type"); !filter.match(contentType) {
+		log.Printf("skip saving %s: Content-Type %q not selected", resp.Request.URL, contentType)
+		return nil
+	}
+
 	buf, err := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if err != nil {
