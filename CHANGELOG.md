@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.1.1](https://github.com/yteraoka/ribapuro/compare/v0.1.0...v0.1.1) - 2026-09-04
+
+- tagpr のタグ push に GitHub App の token を使う by @yteraoka in https://github.com/yteraoka/ribapuro/pull/64
+
 ## [v0.0.2](https://github.com/yteraoka/ribapuro/compare/v0.0.1...v0.0.2) - 2026-09-04
 
 - 保存対象を Content-Type で絞り込む -content-type を追加 by @yteraoka in https://github.com/yteraoka/ribapuro/pull/62
