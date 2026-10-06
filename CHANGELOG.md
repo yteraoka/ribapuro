@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.1](https://github.com/yteraoka/ribapuro/compare/v0.2.0...v0.2.1) - 2026-10-06
+
+- Update Songmu/tagpr action to v1.20.4 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/66
+- Update Songmu/tagpr action to v1.21.0 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/68
+- Update Songmu/tagpr action to v1.21.1 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/69
+
 ## [v0.1.1](https://github.com/yteraoka/ribapuro/compare/v0.1.0...v0.1.1) - 2026-09-04
 
 - tagpr のタグ push に GitHub App の token を使う by @yteraoka in https://github.com/yteraoka/ribapuro/pull/64
