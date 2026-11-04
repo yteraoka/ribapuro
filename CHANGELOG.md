@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.2](https://github.com/yteraoka/ribapuro/compare/v0.2.1...v0.2.2) - 2026-11-04
+
+- Update Songmu/tagpr action to v1.21.4 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/77
+- Update golang Docker tag to v1.27.3 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/79
+
 ## [v0.2.1](https://github.com/yteraoka/ribapuro/compare/v0.2.0...v0.2.1) - 2026-10-27
 
 - Update Songmu/tagpr action to v1.20.4 by @renovate[bot] in https://github.com/yteraoka/ribapuro/pull/66
